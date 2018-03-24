@@ -42,6 +42,16 @@ sun8i_dw_hdmi_mode_valid_a83t(struct drm_connector *connector,
 	return MODE_OK;
 }
 
+static enum drm_mode_status
+sun8i_dw_hdmi_mode_valid_h6(struct drm_connector *connector,
+			    const struct drm_display_mode *mode)
+{
+	if (mode->clock > 600000)
+		return MODE_CLOCK_HIGH;
+
+	return MODE_OK;
+}
+
 static int sun8i_dw_hdmi_bind(struct device *dev, struct device *master,
 			      void *data)
 {
@@ -178,11 +188,19 @@ static int sun8i_dw_hdmi_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static const struct sun8i_dw_hdmi_quirks sun50i_h6_quirks = {
+	.mode_valid = sun8i_dw_hdmi_mode_valid_h6,
+};
+
 static const struct sun8i_dw_hdmi_quirks sun8i_a83t_quirks = {
 	.mode_valid = sun8i_dw_hdmi_mode_valid_a83t,
 };
 
 static const struct of_device_id sun8i_dw_hdmi_dt_ids[] = {
+	{
+		.compatible = "allwinner,sun50i-h6-dw-hdmi",
+		.data = &sun50i_h6_quirks,
+	},
 	{
 		.compatible = "allwinner,sun8i-a83t-dw-hdmi",
 		.data = &sun8i_a83t_quirks,
