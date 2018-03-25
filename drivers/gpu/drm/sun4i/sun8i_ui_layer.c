@@ -29,7 +29,10 @@
 static void sun8i_ui_layer_enable(struct sun8i_mixer *mixer, int channel,
 				  int overlay, bool enable)
 {
-	u32 val;
+	u32 val, bld_base, ch_base;
+
+	bld_base = sun8i_blender_base(mixer);
+	ch_base = sun8i_channel_base(mixer, channel);
 
 	DRM_DEBUG_DRIVER("%sabling channel %d overlay %d\n",
 			 enable ? "En" : "Dis", channel, overlay);
@@ -40,7 +43,7 @@ static void sun8i_ui_layer_enable(struct sun8i_mixer *mixer, int channel,
 		val = 0;
 
 	regmap_update_bits(mixer->engine.regs,
-			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR(channel, overlay),
+			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR(ch_base, overlay),
 			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR_EN, val);
 
 	if (enable)
@@ -49,7 +52,7 @@ static void sun8i_ui_layer_enable(struct sun8i_mixer *mixer, int channel,
 		val = 0;
 
 	regmap_update_bits(mixer->engine.regs,
-			   SUN8I_MIXER_BLEND_PIPE_CTL,
+			   SUN8I_MIXER_BLEND_PIPE_CTL(bld_base),
 			   SUN8I_MIXER_BLEND_PIPE_CTL_EN(channel), val);
 }
 
@@ -58,11 +61,15 @@ static int sun8i_ui_layer_update_coord(struct sun8i_mixer *mixer, int channel,
 {
 	struct drm_plane_state *state = plane->state;
 	u32 src_w, src_h, dst_w, dst_h;
+	u32 bld_base, ch_base;
 	u32 outsize, insize;
 	u32 hphase, vphase;
 
 	DRM_DEBUG_DRIVER("Updating UI channel %d overlay %d\n",
 			 channel, overlay);
+
+	bld_base = sun8i_blender_base(mixer);
+	ch_base = sun8i_channel_base(mixer, channel);
 
 	src_w = drm_rect_width(&state->src) >> 16;
 	src_h = drm_rect_height(&state->src) >> 16;
@@ -84,8 +91,8 @@ static int sun8i_ui_layer_update_coord(struct sun8i_mixer *mixer, int channel,
 		regmap_write(mixer->engine.regs,
 			     SUN8I_MIXER_GLOBAL_SIZE,
 			     outsize);
-		regmap_write(mixer->engine.regs, SUN8I_MIXER_BLEND_OUTSIZE,
-			     outsize);
+		regmap_write(mixer->engine.regs,
+			     SUN8I_MIXER_BLEND_OUTSIZE(bld_base), outsize);
 
 		if (state->crtc)
 			interlaced = state->crtc->state->adjusted_mode.flags
@@ -97,7 +104,7 @@ static int sun8i_ui_layer_update_coord(struct sun8i_mixer *mixer, int channel,
 			val = 0;
 
 		regmap_update_bits(mixer->engine.regs,
-				   SUN8I_MIXER_BLEND_OUTCTL,
+				   SUN8I_MIXER_BLEND_OUTCTL(bld_base),
 				   SUN8I_MIXER_BLEND_OUTCTL_INTERLACED,
 				   val);
 
@@ -110,10 +117,10 @@ static int sun8i_ui_layer_update_coord(struct sun8i_mixer *mixer, int channel,
 			 state->src.x1 >> 16, state->src.y1 >> 16);
 	DRM_DEBUG_DRIVER("Layer source size W: %d H: %d\n", src_w, src_h);
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_CHAN_UI_LAYER_SIZE(channel, overlay),
+		     SUN8I_MIXER_CHAN_UI_LAYER_SIZE(ch_base, overlay),
 		     insize);
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_CHAN_UI_OVL_SIZE(channel),
+		     SUN8I_MIXER_CHAN_UI_OVL_SIZE(ch_base),
 		     insize);
 
 	if (insize != outsize || hphase || vphase) {
@@ -137,10 +144,10 @@ static int sun8i_ui_layer_update_coord(struct sun8i_mixer *mixer, int channel,
 			 state->dst.x1, state->dst.y1);
 	DRM_DEBUG_DRIVER("Layer destination size W: %d H: %d\n", dst_w, dst_h);
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_BLEND_ATTR_COORD(channel),
+		     SUN8I_MIXER_BLEND_ATTR_COORD(bld_base, channel),
 		     SUN8I_MIXER_COORD(state->dst.x1, state->dst.y1));
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_BLEND_ATTR_INSIZE(channel),
+		     SUN8I_MIXER_BLEND_ATTR_INSIZE(bld_base, channel),
 		     outsize);
 
 	return 0;
@@ -151,7 +158,9 @@ static int sun8i_ui_layer_update_formats(struct sun8i_mixer *mixer, int channel,
 {
 	struct drm_plane_state *state = plane->state;
 	const struct de2_fmt_info *fmt_info;
-	u32 val;
+	u32 val, ch_base;
+
+	ch_base = sun8i_channel_base(mixer, channel);
 
 	fmt_info = sun8i_mixer_format_info(state->fb->format->format);
 	if (!fmt_info || !fmt_info->rgb) {
@@ -161,7 +170,7 @@ static int sun8i_ui_layer_update_formats(struct sun8i_mixer *mixer, int channel,
 
 	val = fmt_info->de2_fmt << SUN8I_MIXER_CHAN_UI_LAYER_ATTR_FBFMT_OFFSET;
 	regmap_update_bits(mixer->engine.regs,
-			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR(channel, overlay),
+			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR(ch_base, overlay),
 			   SUN8I_MIXER_CHAN_UI_LAYER_ATTR_FBFMT_MASK, val);
 
 	return 0;
@@ -174,7 +183,10 @@ static int sun8i_ui_layer_update_buffer(struct sun8i_mixer *mixer, int channel,
 	struct drm_framebuffer *fb = state->fb;
 	struct drm_gem_cma_object *gem;
 	dma_addr_t paddr;
+	u32 ch_base;
 	int bpp;
+
+	ch_base = sun8i_channel_base(mixer, channel);
 
 	/* Get the physical address of the buffer in memory */
 	gem = drm_fb_cma_get_gem_obj(fb, 0);
@@ -192,13 +204,13 @@ static int sun8i_ui_layer_update_buffer(struct sun8i_mixer *mixer, int channel,
 	/* Set the line width */
 	DRM_DEBUG_DRIVER("Layer line width: %d bytes\n", fb->pitches[0]);
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_CHAN_UI_LAYER_PITCH(channel, overlay),
+		     SUN8I_MIXER_CHAN_UI_LAYER_PITCH(ch_base, overlay),
 		     fb->pitches[0]);
 
 	DRM_DEBUG_DRIVER("Setting buffer address to %pad\n", &paddr);
 
 	regmap_write(mixer->engine.regs,
-		     SUN8I_MIXER_CHAN_UI_LAYER_TOP_LADDR(channel, overlay),
+		     SUN8I_MIXER_CHAN_UI_LAYER_TOP_LADDR(ch_base, overlay),
 		     lower_32_bits(paddr));
 
 	return 0;
